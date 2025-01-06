@@ -1,0 +1,623 @@
+.ORG 0
+.DEF DELAYR1 = R18  //FOR ALL DELAY SUBROUTINES
+.DEF DELAYR2 = R19  //
+.DEF DELAYR3 = R20  //
+.DEF NOPRESS = R23   
+.DEF LED = R24      //KEEP TRACK OF LIT LED
+.DEF GPR = R30	    //READS INPUT FROM PB
+.DEF LEDCHECK = R25
+.DEF PCOUNT = R17   //THIS WILL KEEP TRACK OF BUTTON PRESSES
+.DEF NUMERATOR = R29
+.DEF DENOMINATOR = R28
+.DEF QUOTIENT = R27
+.DEF QUOTIENT_0 = R22
+.DEF REMAINDER = R26
+.EQU TEMP = 0x123      //Possbible RAM address to use
+    
+//------------------------------------------
+    
+LDI R31, HIGH(RAMEND)
+OUT SPH, R31
+LDI R31, LOW(RAMEND)
+OUT SPL, R31
+LDI R16,0xFF           
+LDI R17,0x30
+OUT DDRD,R16        //SET PD AS OUTPUT
+OUT DDRE,R17	    //SET PE5,PE4 AS OUTPUT REST AS INPUTS
+OUT PORTD, R16      //SET ALL LED'S OFF
+SBI PORTE, 5        //SET BLUE LED OFF TOO
+OUT DDRA, R16       //THE SWITCHES ARE INPUTS
+OUT PORTA, R16      //PULL-UP 
+LDI NOPRESS, 0xFF  
+LDI QUOTIENT_0, 0x00
+		        //INITIALIZE REGISTERS
+CLR GPR
+CLR NUMERATOR
+CLR DENOMINATOR
+CLR QUOTIENT
+CLR PCOUNT 
+CLR REMAINDER    
+CLR LED
+
+    
+//BEGIN PROGRAM    
+
+//------------------------------------------  
+MAINFRAME:                  //CONTINUALLY CHECKS FOR PRESS
+SBIS PINE, 6              
+RJMP DEBOUNCER_6           //JUMP TO DEBOUNCER SWITCH DETECTED
+IN GPR, PINA               //STORE PINA INPUT TO REGISTER *AS LONG AS IT IS PRESSED
+CPSE GPR, NOPRESS	    // IF GPR = FF SKIP THE LOOP
+RJMP DEBOUNCER             //JUMP TO DEBOUNCER SWITCH DETECTED
+RJMP MAINFRAME             //LOOP   
+    
+    
+//------------------------------------------   
+DEBOUNCER:
+CALL DDELAY
+CALL MAX_PAYNE             //CALL DETECT SUBR
+CALL DDELAY		    //14MS DELAY
+CALL DDELAY
+CALL MONA_SAX              //CALL RELEASE DETECTION SUBR, LOOPS UNTIL RELEASED
+RJMP P_COUNT               //SUCCESSFULL PRESS INCREMENT COUNTER
+ 
+//------------------------------------------
+MAX_PAYNE:				//DETECT PUSHBUTTON PRESS
+	        LDI NOPRESS, 0xFF	
+		IN GPR, PINA
+		CP GPR, NOPRESS         //COMPARE SW INPUT WITH FF
+		BREQ MAINFRAME          // NO PRESS - GO BACK TO START
+		RET			//RETURN TO DEBOUNCER
+		
+//------------------------------------------
+MONA_SAX:				//DETECT PUSHBUTTON RELEASE
+AROUND:	LDI NOPRESS, 0xFF     
+	IN GPR, PINA
+	CP NOPRESS, GPR
+	BRNE AROUND
+	RET
+
+//------------------------------------------
+DEBOUNCER_6:		      //DEBOUNCER FOR THE MISFIT PORTE, 6
+	CALL DDELAY           //PRESS DETECTED, CHECK FOR CONTINUOUS PRESS, THEN RELEASE
+	SBIC PINE, 6          //IF PRESS IS NOT CONTINUOUS, RESTART
+	RJMP MAINFRAME 
+	CALL DDELAY
+AROUND1:SBIS PINE, 6          //IF PRESS IS RELEASED SKIP THE LOOP, GO TO COUNTER
+	RJMP AROUND1
+	RJMP P_COUNT
+   
+    
+//------------------------------------------   
+P_COUNT:
+    INC PCOUNT      //COUNTING PRESSES
+    CALL LDELAY     //WILL DETECT PRESSES, IF NONE FOR 1S MOVE TO LED PORTION
+    RJMP LEDOP_X
+//------------------------------------------
+LEDOP_X:
+    CALL DIVISIONx      //PERFORM DIVISION WITH X VALUE
+    CALL LEDINIT        //TURN LEDS OFF
+    RJMP LEDSEQ_X       //START SEQUENCE
+   
+//------------------------------------------ 
+LEDSEQ_X:
+	 LDI LED, 0x00          //SET POSITION 0
+	 LDI GPR, 0x07          //ONE CYCLE = 1-7
+LOOPER:	 CBI PORTD,1
+	 CALL LEDFUNCTIONx      //position 1
+	 CALL DELAY5
+    	 SBI PORTD,1    
+	 CBI PORTD,2
+	 CALL LEDFUNCTIONx
+	 CALL DELAY5
+	 SBI PORTD,2
+	 CBI PORTD,4
+	 CALL LEDFUNCTIONx
+	 CALL DELAY5
+	 SBI PORTD,4
+	 CBI PORTE,5
+	 CALL LEDFUNCTIONx
+	 CALL DELAY5
+	 SBI PORTE,5
+	 CBI PORTD,3
+	 CALL LEDFUNCTIONx
+	 CALL DELAY5
+	 SBI PORTD,3
+	 CBI PORTD,0
+	 CALL LEDFUNCTIONx
+	 CALL DELAY5
+	 SBI PORTD,0
+	 RJMP LOOPER
+
+//------------------------------------------    
+LEDFUNCTIONx:
+    INC LED         //INC POSITION
+    CP LED, GPR     //COMPARE WITH STARTING POSITION
+    BREQ RESETLED   //RESET POSITION TO 1 IF AT START
+    CALL HBUZx       //CALL BUZZER
+    DEC QUOTIENT 
+    CP QUOTIENT, QUOTIENT_0    //WHEN QUOTIENT IS 0 MOVE TO NEXT PHASE
+    BREQ LEDREMAINDERx          //SHOW REMAINDER
+    RET                        //IF NOT 0 GO BACK TO LEDSEQ  
+    
+//------------------------------------------   
+RESETLED:            //RESET POSITION AFTER ONE CYCLE
+    LDI LED, 0x01
+    RET
+//------------------------------------------    
+LEDREMAINDERx:
+   
+  
+    LSL REMAINDER    //MOVE REMAINDER TO RESERVED LED'S PD 5,6,7
+    LSL REMAINDER 
+    LSL REMAINDER
+    LSL REMAINDER
+    LSL REMAINDER
+    COM REMAINDER    //LED'S ARE ACTIVE LOW, SWITCH 1 - 0
+    OUT PORTD, REMAINDER
+    CALL LDELAY2      //TIME TO READ THE REMAINDER IN BINARY 
+    CALL LDELAY2
+    CALL LDELAY2
+    CALL HBUZx       //signal that first operation is over
+    CALL LEDINIT     //TURN OFF ALL LEDS
+    RJMP YZ_CHECK
+    
+//------------------------------------------    
+LEDINIT:              //INITIALIZE LEDS
+   SBI PORTE, 5
+    OUT PORTD, R16   
+    RET   
+    
+    
+//------------------------------------------    
+YZ_CHECK:
+SBRC PCOUNT, 0	    //LSB WILL EITHER BE 1 OR 0 
+RJMP LEDOP_Z
+RJMP LEDOP_Y
+    
+
+//------------------------------------------    
+LEDOP_Y:
+CALL DIVISIONy
+CALL LEDPOSITIONy
+    
+    
+//------------------------------------------    
+LEDPOSITIONy:
+LDI LEDCHECK, 0x01
+CP LED, LEDCHECK  //POSITION 1 
+     BREQ POS2
+	INC LEDCHECK  
+CP LED, LEDCHECK  //POSITION 2
+     BREQ POS3
+	INC LEDCHECK
+CP LED, LEDCHECK  //POSITION 3
+     BREQ POS4
+	INC LEDCHECK
+CP LED, LEDCHECK  //POSITION 4
+     BREQ POS5
+	INC LEDCHECK   
+CP LED, LEDCHECK  //POSITION 5
+     BREQ POS6
+	INC LEDCHECK   
+CP LED, LEDCHECK  //POSITION 6
+     BREQ POS1
+        
+//------------------------------------------     
+LEDSEQ_Y:
+POS1:	 CBI PORTD,1
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+    	 SBI PORTD,1    
+POS2:	 CBI PORTD,2
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+	 SBI PORTD,2
+POS3:	 CBI PORTD,4
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+	 SBI PORTD,4
+POS4:	 CBI PORTE,5
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+	 SBI PORTE,5
+POS5:	 CBI PORTD,3
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+	 SBI PORTD,3
+POS6:	 CBI PORTD,0
+	 CALL LEDFUNCTIONy
+	 CALL DELAY5
+	 SBI PORTD,0
+	 RJMP POS1
+    
+//------------------------------------------    
+LEDFUNCTIONy:
+    CALL HBUZy		       //CALL BUZZER y
+    DEC QUOTIENT 
+    CP QUOTIENT, QUOTIENT_0    //WHEN QUOTIENT IS 0 MOVE TO NEXT PHASE
+    BREQ LEDREMAINDERy         //SHOW REMAINDER
+    RET   
+    
+//------------------------------------------    
+LEDREMAINDERy:
+    
+    LSL REMAINDER	      //MOVE REMAINDER TO RESERVED LED'S PD 5,6,7
+    LSL REMAINDER 
+    LSL REMAINDER
+    LSL REMAINDER
+    LSL REMAINDER
+    COM REMAINDER	     //LED'S ARE ACTIVE LOW, SWITCH 0'S TO 1'S
+    OUT PORTD, REMAINDER
+    CALL LDELAY2	     //TIME TO READ THE REMAINDER IN BINARY 
+    CALL LDELAY2
+    CALL LDELAY2
+    CALL HBUZy		     //signal that operation is over
+    CALL LEDINIT 
+    JMP KITT  
+    
+//------------------------------------------    
+LEDOP_Z:
+CALL DIVISIONz
+CALL LEDPOSITIONz
+    
+//------------------------------------------  
+LEDPOSITIONz:
+LDI LEDCHECK, 0x01
+CP LED, LEDCHECK  //POSITION 1 
+     BREQ POSS2
+	INC LEDCHECK  
+CP LED, LEDCHECK  //POSITION 2
+     BREQ POSS3
+	INC LEDCHECK
+CP LED, LEDCHECK  //POSITION 3
+     BREQ POSS4
+	INC LEDCHECK
+CP LED, LEDCHECK  //POSITION 4
+     BREQ POSS5
+	INC LEDCHECK   
+CP LED, LEDCHECK  //POSITION 5
+     BREQ POSS6
+	INC LEDCHECK   
+CP LED, LEDCHECK  //POSITION 6
+     BREQ POSS1
+        
+//------------------------------------------     
+LEDSEQ_Z:
+POSS1:	 CBI PORTD,1
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+    	 SBI PORTD,1    
+POSS2:	 CBI PORTD,2
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+	 SBI PORTD,2
+POSS3:	 CBI PORTD,4
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+	 SBI PORTD,4
+POSS4:	 CBI PORTE,5
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+	 SBI PORTE,5
+POSS5:	 CBI PORTD,3
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+	 SBI PORTD,3
+POSS6:	 CBI PORTD,0
+	 CALL LEDFUNCTIONz
+	 CALL DELAY5
+	 SBI PORTD,0
+	 RJMP POSS1
+    
+//------------------------------------------   
+LEDFUNCTIONz:
+    CALL HBUZz       //CALL BUZZER y
+    DEC QUOTIENT 
+    CP QUOTIENT, QUOTIENT_0    //WHEN QUOTIENT IS 0 MOVE TO NEXT PHASE
+    BREQ LEDREMAINDERz         //SHOW REMAINDER
+    RET  
+    
+//------------------------------------------    
+LEDREMAINDERz:
+        //MOVE REMAINDER TO RESERVED LED'S PD 5,6,7
+    LSL REMAINDER 
+    LSL REMAINDER
+    LSL REMAINDER
+    LSL REMAINDER
+    LSL REMAINDER
+    COM REMAINDER    //LED'S ARE ACTIVE LOW, SWITCH 0'S TO 1'S
+    OUT PORTD, REMAINDER
+    CALL LDELAY2    //TIME TO READ THE REMAINDER IN BINARY 
+    CALL LDELAY2
+    CALL LDELAY2
+    CALL HBUZz        //signal operation is over
+    CALL LEDINIT
+    JMP KITT    
+    
+//------------------------------------------          
+KITT:                   //KITT WILL NEVER STOP, UNTIL YOU REMOVE HIS BATTERY.
+CBI PORTD,4		
+CALL DELAY1
+SBI PORTD,4
+CBI PORTD,5
+CALL DELAY1
+SBI PORTD,5
+CBI PORTD,6
+CALL DELAY1
+SBI PORTD,6
+CBI PORTD,7
+CALL DELAY1
+SBI PORTD,7
+CBI PORTD,6
+CALL DELAY1
+SBI PORTD,6
+CBI PORTD,5
+CALL DELAY1
+SBI PORTD,5
+RJMP KITT
+  
+    
+    
+//---------------------------------  
+DIVISIONx:
+	    CLR QUOTIENT        //CLEAR QUOTIENT
+	    CLR REMAINDER
+	    
+	    LDI DENOMINATOR, 0x09    //x value
+	    MOV NUMERATOR, PCOUNT   //PLACE PRESS COUNT INTO NUMERATOR
+    SUB1:   INC QUOTIENT
+	    SUB NUMERATOR, DENOMINATOR
+	    BRCC SUB1
+	
+	    DEC QUOTIENT  //SUBTRACT 1 FOR RESULT
+	    ADD NUMERATOR, DENOMINATOR
+	    MOV REMAINDER, NUMERATOR 
+	    RET
+//---------------------------------
+	   
+//---------------------------------  
+DIVISIONy:
+	    CLR QUOTIENT        //CLEAR QUOTIENT
+	    CLR REMAINDER
+	    
+            LDI DENOMINATOR, 0x05   //y value
+	    MOV NUMERATOR, PCOUNT   //PLACE PRESS COUNT INTO NUMERATOR
+    SUB2:   INC QUOTIENT
+	    SUB NUMERATOR, DENOMINATOR
+	    BRCC SUB2
+	
+	    DEC QUOTIENT  //SUBTRACT 1 FOR RESULT
+	    ADD NUMERATOR, DENOMINATOR
+	    MOV REMAINDER, NUMERATOR 
+	    RET
+//---------------------------------
+
+//---------------------------------  
+DIVISIONz:
+	    CLR QUOTIENT    //CLEAR QUOTIENT
+	    CLR REMAINDER	
+    
+            LDI DENOMINATOR, 0x06   //zvalue
+	    MOV NUMERATOR, PCOUNT   //PLACE PRESS COUNT INTO NUMERATOR
+    SUB3:   INC QUOTIENT
+	    SUB NUMERATOR, DENOMINATOR
+	    BRCC SUB3
+	
+	    DEC QUOTIENT  //SUBTRACT 1 FOR RESULT
+	    ADD NUMERATOR, DENOMINATOR
+	    MOV REMAINDER, NUMERATOR 
+	    RET
+//---------------------------------
+    
+	 
+//---------------------------------    
+ DDELAY:			    
+          LDI DELAYR1, 0x32         //dELAY OF 7ms for reliable debouncing 
+ LOP1:   LDI DELAYR2, 0xFF
+ LOP2:   
+	  DEC DELAYR2
+	  BRNE LOP2
+	  
+	  DEC DELAYR1
+	  BRNE LOP1
+	  RET     			  
+//---------------------------------    
+	
+//---------------------------------    
+ LDELAY:  	                          
+	  LDI DELAYR3, 0xC8          //dELAY OF 1s need 16M CLOCK CYCLES
+ L3:	   
+	  LDI DELAYR1, 0xFF   
+	  //------------------------------ 
+ L1:	  IN GPR, PINA  
+	  CPSE GPR, NOPRESS
+	  RJMP DEBOUNCER  //THIS WILL INTERRUPT IF PRESS DETECTED DURING DELAY
+	  SBIS PINE, 6
+	  RJMP DEBOUNCER_6
+	  //---------------------------------
+	  LDI DELAYR2, 0xFF
+ L2:	   
+	  DEC DELAYR2
+	  BRNE L2
+	  
+	  DEC DELAYR1
+	  BRNE L1
+	  
+	  DEC DELAYR3
+	  BRNE L3
+
+	  RET     	
+
+	  
+//---------------------------------    
+	  
+ LDELAY2:  	                          
+	  LDI DELAYR3, 0xC8          //dELAY OF 1s need 16M CLOCK CYCLES
+ LL3:	  LDI DELAYR1, 0xFF   
+	 
+ LL1:	  LDI DELAYR2, 0xFF
+ LL2:	   
+	  DEC DELAYR2
+	  BRNE LL2
+	  
+	  DEC DELAYR1
+	  BRNE LL1
+	  
+	  DEC DELAYR3
+	  BRNE LL3
+
+	  RET 
+
+//---------------------------------
+HBUZx: 
+ LDI R22, 0xF6                //ENVELOPE GENERATOR | GATE
+ 
+    BEGIN1:  LDI R21, 0x02
+	     
+    BEGIN:   CBI PORTE, 4      //SQUARE WAVE OSCILLATOR 
+	     CALL DBUZZERx 
+	     SBI PORTE, 4
+	     CALL DBUZZERx
+	    
+	    DEC R21
+	    BRNE BEGIN
+	    DEC R22
+	    BRNE BEGIN1
+	    RET
+//---------------------------------
+	   
+	 
+//---------------------------------   
+HBUZz: 
+LDI R22, 0xF6                //ENVELOPE GENERATOR | GATE
+ 
+    BEGIN3:  LDI R21, 0x02
+	     
+    BEGIN2:   CBI PORTE, 4      //SQUARE WAVE OSCILLATOR 
+	     CALL DBUZZERz
+	     SBI PORTE, 4
+	     CALL DBUZZERz
+	    
+	    DEC R21
+	    BRNE BEGIN2
+	    DEC R22
+	    BRNE BEGIN3
+	    RET
+//---------------------------------
+	    
+//---------------------------------
+HBUZy: 
+ LDI R22, 0xF6                //ENVELOPE GENERATOR | GATE
+ 
+    BEGIN5:  LDI R21, 0x02
+	     
+    BEGIN4:  CBI PORTE, 4      //SQUARE WAVE OSCILLATOR 
+	     CALL DBUZZERy
+	     SBI PORTE, 4
+	     CALL DBUZZERy
+	    
+	    DEC R21
+	    BRNE BEGIN4
+	    DEC R22
+	    BRNE BEGIN5
+	    RET
+//---------------------------------
+	    
+	    
+//---------------------------------
+DBUZZERx:                //BUZZER DELAY SETS FREQUENCYx
+    
+       LDI DELAYR1, 0x04
+  LO1: LDI DELAYR2, 0x05
+  LO2: LDI DELAYR3, 0x1F
+  LO3:
+    NOP
+    NOP
+    DEC DELAYR3
+    BRNE LO3
+    
+    DEC DELAYR2
+    BRNE LO2
+    
+    DEC DELAYR1
+    BRNE LO1
+    RET
+//---------------------------------    
+    
+//---------------------------------
+DBUZZERy:                //BUZZER DELAY SETS FREQUENCYy
+    
+  LDI DELAYR1, 0x04
+  LOO1: LDI DELAYR2, 0x08
+  LOO2: LDI DELAYR3, 0x2F
+  LOO3:
+    NOP
+    NOP
+    DEC DELAYR3
+    BRNE LOO3
+    
+    DEC DELAYR2
+    BRNE LOO2
+    
+    DEC DELAYR1
+    BRNE LOO1
+    RET
+//---------------------------------  
+   
+//---------------------------------
+DBUZZERz:                //BUZZER DELAY SETS FREQUENCYz
+    
+  LDI DELAYR1, 0x04
+  LOOP1: LDI DELAYR2, 0x05
+  LOOP2: LDI DELAYR3, 0x0A
+  LOOP3:
+    NOP
+    NOP
+    DEC DELAYR3
+    BRNE LOOP3
+    
+    DEC DELAYR2
+    BRNE LOOP2
+    
+    DEC DELAYR1
+    BRNE LOOP1
+    RET
+//---------------------------------
+    
+//---------------------------------    
+DELAY5:
+    LDI DELAYR1, 0x20         //DELAY FOR LED TRANSITIONS
+    LP1: LDI DELAYR2, 0xC8     
+    LP2: LDI DELAYR3, 0xFA     
+    LP3:
+	NOP
+	NOP
+	DEC DELAYR3
+	BRNE LP3
+	
+	DEC DELAYR2
+	BRNE LP2
+	
+	DEC DELAYR1
+	BRNE LP1
+	RET
+//---------------------------------
+
+//---------------------------------    
+DELAY1:
+    LDI DELAYR1, 0x9         //DELAY FOR LED TRANSITIONS
+    LPPP1: LDI DELAYR2, 0xC8     
+    LPPP2: LDI DELAYR3, 0xFA     
+    LPPP3:
+	NOP
+	NOP
+	DEC DELAYR3
+	BRNE LPPP3
+	
+	DEC DELAYR2
+	BRNE LPPP2
+	
+	DEC DELAYR1
+	BRNE LPPP1
+	RET
